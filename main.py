@@ -1,74 +1,54 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.responses import StreamingResponse
 import cv2
 import numpy as np
-from io import BytesIO
-import matplotlib.pyplot as plt  # Import matplotlib for later use (if needed)
+import matplotlib.pyplot as plt
+from fastapi import FastAPI, UploadFile, File
+from fastapi.responses import FileResponse
+import os
 
 app = FastAPI()
 
-@app.post("/edge_detection")
-async def detect_edges(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+@app.post("/upload_image/")
+async def upload_image(file: UploadFile = File(...)):
+    # Save the uploaded image temporarily
+    temp_input_path = "temp_input.jpg"
+    with open(temp_input_path, "wb") as f:
+        f.write(await file.read())
 
-        if image is None:
-            raise HTTPException(status_code=400, detail="Invalid image file")
-        
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(image, (15, 15), 0)
-        edge = cv2.Canny(blur, 100, 200)
+    # Read the uploaded image
+    img = cv2.imread(temp_input_path)
 
-        # Encode the edge image to JPEG format for streaming
-        ret, encoded_image = cv2.imencode('.jpg', edge)
-        if not ret:
-            raise HTTPException(status_code=500, detail="Error encoding image")
+    # Convert the image to grayscale (necessary for edge detection)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        # Return the image as a stream
-        return StreamingResponse(BytesIO(encoded_image.tobytes()), media_type="image/jpeg")
+    # Apply Canny edge detection
+    edges = cv2.Canny(gray, 100, 200)
 
-    except Exception as e:
-        print(f"An error occurred: {e}")  # Print for debugging
-        raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+    # Convert BGR to RGB for proper display in matplotlib
+    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+    # Plotting the images using matplotlib and saving it as a temporary file
+    output_path = "output_image.jpg"
+    plt.figure(figsize=(10, 5))
 
+    # Original Image
+    plt.subplot(1, 2, 1)
+    plt.imshow(img_rgb)
+    plt.title('Original Image')
+    plt.axis('off')
 
-# Example of a route that returns the original image (optional)
-@app.post("/original_image")
-async def return_original_image(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        return StreamingResponse(BytesIO(contents), media_type=file.content_type)  # Directly stream the uploaded file
+    # Edge Detection Image
+    plt.subplot(1, 2, 2)
+    plt.imshow(edges, cmap='gray')
+    plt.title('Edge Detection')
+    plt.axis('off')
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"An error occurred: {e}")
+    # Save the figure as a temporary image file
+    plt.savefig(output_path)
+    plt.close()
 
+    # Remove the temporary input image
+    os.remove(temp_input_path)
 
-#If you want to display using matplotlib, you can create a separate endpoint and encode the image using base64
-import base64
-@app.post("/edge_detection_matplotlib")
-async def detect_edges_matplotlib(file: UploadFile = File(...)):
-    try:
-        contents = await file.read()
-        nparr = np.frombuffer(contents, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    # Return the processed image as a FileResponse
+    return FileResponse(output_path, media_type='image/jpeg', filename='processed_image.jpg')
 
-        if image is None:
-            raise HTTPException(status_code=400, detail="Invalid image file")
-        
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(image, (15, 15), 0)
-        edge = cv2.Canny(blur, 100, 200)
-
-        # Encode the edge image to base64 string
-        _, encoded_image = cv2.imencode('.png', edge)  # Use PNG for lossless encoding
-        encoded_string = base64.b64encode(encoded_image).decode('utf-8')
-
-
-        return {"image_base64": encoded_string} # return the base64 encoded string
-
-    except Exception as e:
-        print(f"An error occurred: {e}")  # Print for debugging
-        raise HTTPException
